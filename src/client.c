@@ -92,7 +92,7 @@ int main(void) {
             return EXIT_FAILURE;
 
         if (option == '4') {
-            printf("Closing connection.\n");
+            printf("\nClosing connection.\n");
             break;
         }
 
@@ -108,7 +108,6 @@ int main(void) {
 
         recvBuff[bytesRecv] = '\0'; 
         printf("\nReceived from server: %s\n", recvBuff);
-
     }
 
     closesocket(connSocket);
