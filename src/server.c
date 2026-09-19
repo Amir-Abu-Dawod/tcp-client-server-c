@@ -125,43 +125,68 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
     /* Receive the response from the main server*/
     int totalBytesReceived = 0;
 
-    while (totalBytesReceived < bufferSize - 1)
-    {
+    while (totalBytesReceived < bufferSize - 1) {
         int remainingSpace =
-            bufferSize - 1 - totalBytesReceived;
+            bufferSize - totalBytesReceived - 1;
 
-        int bytesReceived = recv(
-            serverSocket,
-            responseBuffer + totalBytesReceived,
-            remainingSpace,
-            0);
+        int bytesReceived =
+            recv(
+                serverSocket,
+                responseBuffer + totalBytesReceived,
+                remainingSpace,
+                0
+            );
 
-        if (bytesReceived == SOCKET_ERROR)
-        {
+        if (bytesReceived > 0) {
+            totalBytesReceived += bytesReceived;
+            continue;
+        }
+
+        if (bytesReceived == 0) {
+            break;
+        }
+
+        printf(
+            "Error receiving HTTP response: %d\n",
+            WSAGetLastError()
+        );
+
+        closesocket(serverSocket);
+        return false;
+    }
+
+    /*
+     * If the buffer became completely full, check whether
+     * additional response data still exists.
+     */
+    if (totalBytesReceived == bufferSize - 1) {
+        char extraByte;
+
+        int extraBytes =
+            recv(serverSocket, &extraByte, 1, 0);
+
+        if (extraBytes > 0) {
             printf(
-                "Error receiving HTTP response: %d\n",
-                WSAGetLastError());
+                "Response buffer too small to hold entire response.\n"
+            );
 
             closesocket(serverSocket);
             return false;
         }
 
-        if (bytesReceived == 0)
-        {
-            break;
+        if (extraBytes == SOCKET_ERROR) {
+            printf(
+                "Error receiving HTTP response: %d\n",
+                WSAGetLastError()
+            );
+
+            closesocket(serverSocket);
+            return false;
         }
-
-        totalBytesReceived += bytesReceived;
-    }
-
-    if (totalBytesReceived == bufferSize - 1)
-    {
-        printf("HTTP response exceeded response buffer capacity.\n");
-        closesocket(serverSocket);
-        return false;
     }
 
     responseBuffer[totalBytesReceived] = '\0';
+
     closesocket(serverSocket);
 
     return true;
