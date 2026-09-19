@@ -261,6 +261,124 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
     return true;
 }
 
+bool handleResourceRequest(
+    SOCKET clientSocket,
+    const char *cacheFilename,
+    const char *httpRequest,
+    const char *errorMessage)
+{
+    char *fileContent = readFile(cacheFilename);
+
+    /*
+     * Cache hit:
+     * send the locally stored response.
+     */
+    if (fileContent != NULL)
+    {
+        bool sendSucceeded = sendFramedResponse(
+            clientSocket,
+            fileContent,
+            (int)strlen(fileContent)
+        );
+
+        free(fileContent);
+
+        if (!sendSucceeded)
+        {
+            printf("Failed to send cached response to client.\n");
+            return false;
+        }
+
+        return true;
+    }
+
+    /*
+     * Cache miss:
+     * retrieve the resource from the HTTP server.
+     */
+    printf(
+        "File '%s' not found locally. Making HTTP request...\n",
+        cacheFilename
+    );
+
+    char responseBuffer[5000];
+
+    if (!sendHttpRequest(
+            httpRequest,
+            responseBuffer,
+            (int)sizeof(responseBuffer)))
+    {
+        /*
+         * HTTP retrieval failed, but the client should still
+         * receive a framed error response.
+         */
+        if (!sendFramedResponse(
+                clientSocket,
+                errorMessage,
+                (int)strlen(errorMessage)))
+        {
+            printf("Failed to send error response to client.\n");
+            return false;
+        }
+
+        return true;
+    }
+
+    /*
+     * HTTP retrieval succeeded.
+     * Cache the response locally.
+     */
+    FILE *newFile = fopen(cacheFilename, "wb");
+
+    size_t responseLength = strlen(responseBuffer);
+
+    if (newFile != NULL)
+    {
+        if (fwrite(
+                responseBuffer,
+                1,
+                responseLength,
+                newFile) != responseLength)
+        {
+            printf(
+                "Error writing to file '%s'.\n",
+                cacheFilename
+            );
+        }
+        else
+        {
+            printf(
+                "Content saved to '%s'.\n",
+                cacheFilename
+            );
+        }
+
+        fclose(newFile);
+    }
+    else
+    {
+        printf(
+            "Error creating '%s'.\n",
+            cacheFilename
+        );
+    }
+
+    /*
+     * Whether caching succeeded or not, we already have the
+     * HTTP response and can return it to the client.
+     */
+    if (!sendFramedResponse(
+            clientSocket,
+            responseBuffer,
+            (int)responseLength))
+    {
+        printf("Failed to send response to client.\n");
+        return false;
+    }
+
+    return true;
+}
+
 bool checkForAnError(int bytesResult, const char *errorAt, SOCKET socket_1, SOCKET socket_2)
 {
     if (SOCKET_ERROR == bytesResult)
@@ -366,166 +484,52 @@ int main(void)
             // Option 1
             if (strcmp(recvBuff, "anything") == 0)
             {
-                char *fileContent = readFile("anything.txt");
-                if (fileContent != NULL)
+                const char *httpRequest =
+                    "GET /anything HTTP/1.1\r\n"
+                    "Host: httpbin.org\r\n"
+                    "Connection: close\r\n"
+                    "\r\n";
+
+                const char *errorMessage =
+                    "ERROR: Failed to retrieve anything resource.";
+
+                if (!handleResourceRequest(
+                        msgSocket,
+                        "anything.txt",
+                        httpRequest,
+                        errorMessage))
                 {
-                    /*Send the received content to the client*/
-                    if (!sendFramedResponse(
-                            msgSocket,
-                            fileContent,
-                            (int)strlen(fileContent)))
-                    {
-                        printf("Failed to send response to client.\n");
-                        closesocket(msgSocket);
-                        closesocket(listenSocket);
-                        WSACleanup();
-                        free(fileContent);
-                        return EXIT_FAILURE;
-                    }
+                    closesocket(msgSocket);
+                    closesocket(listenSocket);
+                    WSACleanup();
 
-                }
-                else
-                {
-                    printf("File 'anything.txt' not found locally. Making HTTP request...\n");
-
-                    /* Send HTTP request to main server */
-                    char responseBuffer[5000];
-                    if (sendHttpRequest("GET /anything HTTP/1.1\r\nHost: httpbin.org\r\nConnection: close\r\n\r\n",
-                                        responseBuffer, sizeof(responseBuffer)))
-                    {
-                        /*Save the received content to a new file*/
-                        FILE *newFile = fopen("anything.txt", "wb");
-                        size_t responseLength = strlen(responseBuffer);
-
-                        if (newFile != NULL)
-                        {
-                            if (fwrite(responseBuffer, 1, responseLength, newFile) != responseLength)
-                            {
-                                printf("Error writing to file 'anything.txt'.\n");
-                            }
-                            else
-                            {
-                                printf("Content saved to 'anything.txt'.\n");
-                            }
-                            fclose(newFile);
-                        }
-                        else
-                        {
-                            printf("Error creating 'anything.txt'.\n");
-                        }
-
-                        /*Send the received content to the client*/
-                        if (!sendFramedResponse(
-                                msgSocket,
-                                responseBuffer,
-                                (int)strlen(responseBuffer)))
-                        {
-                            printf("Failed to send response to client.\n");
-                            closesocket(msgSocket);
-                            closesocket(listenSocket);
-                            WSACleanup();
-                            return EXIT_FAILURE;
-                        }
-                    }
-                    else
-                    {
-                        const char *errorMessage = "ERROR: Failed to retrieve anything resource.";
-
-                        /*Send error message to the client*/
-                        if (!sendFramedResponse(
-                                msgSocket,
-                                errorMessage,
-                                (int)strlen(errorMessage)))
-                        {
-                            printf("Failed to send response to client.\n");
-                            closesocket(msgSocket);
-                            closesocket(listenSocket);
-                            WSACleanup();
-                            return EXIT_FAILURE;
-                        }
-                    }
+                    return EXIT_FAILURE;
                 }
             }
             
             // Option 2
             else if (strcmp(recvBuff, "json") == 0)
-            { /* Second Request */
-                char *fileContent = readFile("json.txt");
-                if (fileContent != NULL)
+            {
+                const char *httpRequest =
+                    "GET /json HTTP/1.1\r\n"
+                    "Host: httpbin.org\r\n"
+                    "Connection: close\r\n"
+                    "\r\n";
+
+                const char *errorMessage =
+                    "ERROR: Failed to retrieve JSON resource.";
+
+                if (!handleResourceRequest(
+                        msgSocket,
+                        "json.txt",
+                        httpRequest,
+                        errorMessage))
                 {
-                    /* Send the received content to the client*/
-                    if (!sendFramedResponse(
-                            msgSocket,
-                            fileContent,
-                            (int)strlen(fileContent)))
-                    {
-                        printf("Failed to send response to client.\n");
-                        closesocket(msgSocket);
-                        closesocket(listenSocket);
-                        WSACleanup();
-                        return EXIT_FAILURE;
-                    }
-                }
-                else
-                {
-                    printf("File 'json.txt' not found locally. Making HTTP request...\n");
+                    closesocket(msgSocket);
+                    closesocket(listenSocket);
+                    WSACleanup();
 
-                    /* Send HTTP request to main server */
-                    char responseBuffer[5000];
-                    if (sendHttpRequest("GET /json HTTP/1.1\r\nHost: httpbin.org\r\nConnection: close\r\n\r\n",
-                                        responseBuffer, sizeof(responseBuffer)))
-                    {
-                        /*Save the received content to a new file*/
-                        FILE *newFile = fopen("json.txt", "wb");
-                        size_t responseLength = strlen(responseBuffer);
-
-                        if (newFile != NULL)
-                        {
-                            if (fwrite(responseBuffer, 1, responseLength, newFile) != responseLength)
-                            {
-                                printf("Error writing to file 'json.txt'.\n");
-                            }
-                            else
-                            {
-                                printf("Content saved to 'json.txt'.\n");
-                            }
-                            fclose(newFile);
-                        }
-                        else
-                        {
-                            printf("Error creating 'json.txt'.\n");
-                        }
-
-                        /* Send the received content to the client*/
-                        if (!sendFramedResponse(
-                                msgSocket,
-                                responseBuffer,
-                                (int)strlen(responseBuffer)))
-                        {
-                            printf("Failed to send response to client.\n");
-                            closesocket(msgSocket);
-                            closesocket(listenSocket);
-                            WSACleanup();
-                            return EXIT_FAILURE;
-                        }
-                    }
-                    else
-                    {
-                        const char *errorMessage = "ERROR: Failed to retrieve JSON resource.";
-
-                        /*Send error message to the client*/
-                        if (!sendFramedResponse(
-                                msgSocket,
-                                errorMessage,
-                                (int)strlen(errorMessage)))
-                        {
-                            printf("Failed to send response to client.\n");
-                            closesocket(msgSocket);
-                            closesocket(listenSocket);
-                            WSACleanup();
-                            return EXIT_FAILURE;
-                        }
-                    }
+                    return EXIT_FAILURE;
                 }
             }
 
