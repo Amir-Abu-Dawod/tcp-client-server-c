@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <winsock2.h>
 #include <string.h>
 #include <time.h>
@@ -73,6 +74,75 @@ char *readFile(const char *filename)
     return buffer;
 }
 
+bool sendAll(SOCKET socket, const char *data, int length)
+{
+    int totalSent = 0;
+
+    while (totalSent < length)
+    {
+        int bytesSent = send(
+            socket,
+            data + totalSent,
+            length - totalSent,
+            0
+        );
+
+        if (bytesSent == SOCKET_ERROR)
+        {
+            printf(
+                "Error sending data: %d\n",
+                WSAGetLastError()
+            );
+            return false;
+        }
+
+        if (bytesSent == 0)
+        {
+            printf("Socket closed while sending data.\n");
+            return false;
+        }
+
+        totalSent += bytesSent;
+    }
+
+    return true;
+}
+
+bool sendFramedResponse(
+    SOCKET socket,
+    const char *payload,
+    int payloadLength
+)
+{
+    if (payload == NULL || payloadLength < 0)
+    {
+        return false;
+    }
+
+    uint32_t networkLength =
+        htonl((uint32_t)payloadLength);
+
+        //send first 4-bytes response  
+    if (!sendAll(
+            socket,
+            (const char *)&networkLength,
+            (int)sizeof(networkLength)))
+    {
+        return false;
+    }
+
+    if (payloadLength == 0)
+    {
+        return true;
+    }
+
+    return sendAll(
+        socket,
+        payload,
+        payloadLength
+    );
+}
+
 /* Function to send HTTP request to the main server */
 bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
 {
@@ -114,8 +184,7 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
     }
 
     /* Send the request to the main server*/
-    int bytesSent = send(serverSocket, request, strlen(request), 0);
-    if (bytesSent == SOCKET_ERROR)
+    if (!sendAll(serverSocket, request, (int)strlen(request)))
     {
         printf("Error sending request to server.\n");
         closesocket(serverSocket);
@@ -275,7 +344,6 @@ int main(void)
         printf("Time Server: Client is connected.\n");
         while (1)
         {
-            int bytesSent = 0;
             int bytesRecv = 0;
             char recvBuff[255];
 
@@ -302,14 +370,19 @@ int main(void)
                 if (fileContent != NULL)
                 {
                     /*Send the received content to the client*/
-                    bytesSent = send(msgSocket, fileContent, (int)strlen(fileContent), 0);
-
-                    free(fileContent);
-
-                    if (checkForAnError(bytesSent, "send", listenSocket, msgSocket))
+                    if (!sendFramedResponse(
+                            msgSocket,
+                            fileContent,
+                            (int)strlen(fileContent)))
                     {
+                        printf("Failed to send response to client.\n");
+                        closesocket(msgSocket);
+                        closesocket(listenSocket);
+                        WSACleanup();
+                        free(fileContent);
                         return EXIT_FAILURE;
                     }
+
                 }
                 else
                 {
@@ -342,18 +415,32 @@ int main(void)
                         }
 
                         /*Send the received content to the client*/
-                        bytesSent = send(msgSocket, responseBuffer, (int)strlen(responseBuffer), 0);
-                        if (checkForAnError(bytesSent, "send", listenSocket, msgSocket)) {
+                        if (!sendFramedResponse(
+                                msgSocket,
+                                responseBuffer,
+                                (int)strlen(responseBuffer)))
+                        {
+                            printf("Failed to send response to client.\n");
+                            closesocket(msgSocket);
+                            closesocket(listenSocket);
+                            WSACleanup();
                             return EXIT_FAILURE;
                         }
                     }
                     else
                     {
-                        char *errorMassege = "ERROR: Failed to retrieve anything resource.";
+                        const char *errorMessage = "ERROR: Failed to retrieve anything resource.";
 
                         /*Send error message to the client*/
-                        bytesSent = send(msgSocket, errorMassege, (int)strlen(errorMassege), 0);
-                        if (checkForAnError(bytesSent, "send", listenSocket, msgSocket)) {
+                        if (!sendFramedResponse(
+                                msgSocket,
+                                errorMessage,
+                                (int)strlen(errorMessage)))
+                        {
+                            printf("Failed to send response to client.\n");
+                            closesocket(msgSocket);
+                            closesocket(listenSocket);
+                            WSACleanup();
                             return EXIT_FAILURE;
                         }
                     }
@@ -367,11 +454,15 @@ int main(void)
                 if (fileContent != NULL)
                 {
                     /* Send the received content to the client*/
-                    bytesSent = send(msgSocket, fileContent, (int)strlen(fileContent), 0);
-                    free(fileContent);
-                    
-                    if (checkForAnError(bytesSent, "send", listenSocket, msgSocket))
+                    if (!sendFramedResponse(
+                            msgSocket,
+                            fileContent,
+                            (int)strlen(fileContent)))
                     {
+                        printf("Failed to send response to client.\n");
+                        closesocket(msgSocket);
+                        closesocket(listenSocket);
+                        WSACleanup();
                         return EXIT_FAILURE;
                     }
                 }
@@ -406,19 +497,32 @@ int main(void)
                         }
 
                         /* Send the received content to the client*/
-                        bytesSent = send(msgSocket, responseBuffer, (int)strlen(responseBuffer), 0);
-                        if (checkForAnError(bytesSent, "send", listenSocket, msgSocket))
+                        if (!sendFramedResponse(
+                                msgSocket,
+                                responseBuffer,
+                                (int)strlen(responseBuffer)))
                         {
+                            printf("Failed to send response to client.\n");
+                            closesocket(msgSocket);
+                            closesocket(listenSocket);
+                            WSACleanup();
                             return EXIT_FAILURE;
                         }
                     }
                     else
                     {
-                        char *errorMassege = "ERROR: Failed to retrieve JSON resource.";
+                        const char *errorMessage = "ERROR: Failed to retrieve JSON resource.";
 
                         /*Send error message to the client*/
-                        bytesSent = send(msgSocket, errorMassege, (int)strlen(errorMassege), 0);
-                        if (checkForAnError(bytesSent, "send", listenSocket, msgSocket)) {
+                        if (!sendFramedResponse(
+                                msgSocket,
+                                errorMessage,
+                                (int)strlen(errorMessage)))
+                        {
+                            printf("Failed to send response to client.\n");
+                            closesocket(msgSocket);
+                            closesocket(listenSocket);
+                            WSACleanup();
                             return EXIT_FAILURE;
                         }
                     }
@@ -451,8 +555,15 @@ int main(void)
                 strcat(rttStr, " ms");
 
                 /* Send the string back to the client*/
-                int bytesSent = send(msgSocket, rttStr, (int)strlen(rttStr), 0);
-                if(checkForAnError(bytesSent, "send", listenSocket, msgSocket)) {
+                if (!sendFramedResponse(
+                        msgSocket,
+                        rttStr,
+                        (int)strlen(rttStr)))
+                {
+                    printf("Failed to send RTT response to client.\n");
+                    closesocket(msgSocket);
+                    closesocket(listenSocket);
+                    WSACleanup();
                     return EXIT_FAILURE;
                 }
             }

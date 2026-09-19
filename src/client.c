@@ -1,10 +1,11 @@
+#include <stdint.h>
 #include <winsock2.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <stdlib.h>
 
-
+const uint32_t MAX_RESPONSE_SIZE = 1024 * 1024;
 const int TIME_PORT = 27015;
 
 bool checkForAnError(int bytesResult, const char* errorAt, SOCKET socket){
@@ -16,6 +17,112 @@ bool checkForAnError(int bytesResult, const char* errorAt, SOCKET socket){
         return true;
     }
     return false;
+}
+
+int recvAll(
+    SOCKET socket,
+    char *buffer,
+    int length
+)
+{
+    int totalReceived = 0;
+
+    while (totalReceived < length)
+    {
+        int bytesReceived = recv(
+            socket,
+            buffer + totalReceived,
+            length - totalReceived,
+            0
+        );
+
+        if (bytesReceived > 0)
+        {
+            totalReceived += bytesReceived;
+            continue;
+        }
+
+        if (bytesReceived == 0)
+        {
+            //peer closed connection
+            return 0;
+        }
+
+        printf(
+            "Error receiving data: %d\n",
+            WSAGetLastError()
+        );
+
+        //socket error
+        return -1;
+    }
+
+    //successfully received everything requested
+    return 1;
+}
+
+int receiveFramedResponse(SOCKET socket)
+{
+    uint32_t networkLength = 0;
+
+    int status = recvAll(
+        socket,
+        (char *)&networkLength,
+        (int)sizeof(networkLength)
+    );
+
+    if (status <= 0)
+    {
+        return status;
+    }
+
+    uint32_t payloadLength =
+        ntohl(networkLength);
+
+    if (payloadLength > MAX_RESPONSE_SIZE)
+    {
+        printf(
+            "Server response exceeds maximum allowed size.\n"
+        );
+        return -1;
+    }
+
+    char *response =
+        malloc((size_t)payloadLength + 1);
+
+    if (response == NULL)
+    {
+        printf(
+            "Failed to allocate response buffer.\n"
+        );
+        return -1;
+    }
+
+    if (payloadLength > 0)
+    {
+        status = recvAll(
+            socket,
+            response,
+            (int)payloadLength
+        );
+
+        if (status <= 0)
+        {
+            free(response);
+            return status;
+        }
+    }
+
+    response[payloadLength] = '\0';
+
+    printf(
+        "\nReceived from server:\n%s\n",
+        response
+    );
+
+    free(response);
+
+    return 1;
 }
 
 int main(void) {
@@ -50,10 +157,8 @@ int main(void) {
     printf("Connection established successfully.\n");
 
     int bytesSent = 0;
-    int bytesRecv = 0;
 
     char sendBuff[255];
-    char recvBuff[255];
     char option;
 
     while (true) {
@@ -97,17 +202,27 @@ int main(void) {
         }
 
         // Reserve one byte for the null terminator.
-        bytesRecv = recv(connSocket, recvBuff, (int)sizeof(recvBuff) - 1, 0);
-        if (checkForAnError(bytesRecv, "recv", connSocket))
-            return EXIT_FAILURE;
+        int receiveStatus = receiveFramedResponse(connSocket);
 
-        if (bytesRecv == 0) {
-            printf("\nServer closed the connection.\n");
+        if (receiveStatus == 0)
+        {
+            printf(
+                "\nServer closed the connection.\n"
+            );
             break;
         }
 
-        recvBuff[bytesRecv] = '\0'; 
-        printf("\nReceived from server: %s\n", recvBuff);
+        if (receiveStatus < 0)
+        {
+            printf(
+                "\nFailed to receive server response.\n"
+            );
+
+            closesocket(connSocket);
+            WSACleanup();
+
+            return EXIT_FAILURE;
+        }
     }
 
     closesocket(connSocket);
