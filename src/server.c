@@ -7,7 +7,7 @@
 #include <stdbool.h>
 #include <math.h>
 
-const int TIME_PORT = 27015;
+const int SERVER_PORT = 27015;
 const char *HTTP_SERVER_ADDRESS = "httpbin.org";
 const int HTTP_SERVER_PORT = 80;
 
@@ -84,15 +84,13 @@ bool sendAll(SOCKET socket, const char *data, int length)
             socket,
             data + totalSent,
             length - totalSent,
-            0
-        );
+            0);
 
         if (bytesSent == SOCKET_ERROR)
         {
             printf(
                 "Error sending data: %d\n",
-                WSAGetLastError()
-            );
+                WSAGetLastError());
             return false;
         }
 
@@ -111,8 +109,7 @@ bool sendAll(SOCKET socket, const char *data, int length)
 bool sendFramedResponse(
     SOCKET socket,
     const char *payload,
-    int payloadLength
-)
+    int payloadLength)
 {
     if (payload == NULL || payloadLength < 0)
     {
@@ -122,7 +119,7 @@ bool sendFramedResponse(
     uint32_t networkLength =
         htonl((uint32_t)payloadLength);
 
-        //send first 4-bytes response  
+    // send first 4-bytes response
     if (!sendAll(
             socket,
             (const char *)&networkLength,
@@ -139,8 +136,7 @@ bool sendFramedResponse(
     return sendAll(
         socket,
         payload,
-        payloadLength
-    );
+        payloadLength);
 }
 
 /* Function to send HTTP request to the main server */
@@ -194,7 +190,8 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
     /* Receive the response from the main server*/
     int totalBytesReceived = 0;
 
-    while (totalBytesReceived < bufferSize - 1) {
+    while (totalBytesReceived < bufferSize - 1)
+    {
         int remainingSpace =
             bufferSize - totalBytesReceived - 1;
 
@@ -203,22 +200,22 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
                 serverSocket,
                 responseBuffer + totalBytesReceived,
                 remainingSpace,
-                0
-            );
+                0);
 
-        if (bytesReceived > 0) {
+        if (bytesReceived > 0)
+        {
             totalBytesReceived += bytesReceived;
             continue;
         }
 
-        if (bytesReceived == 0) {
+        if (bytesReceived == 0)
+        {
             break;
         }
 
         printf(
             "Error receiving HTTP response: %d\n",
-            WSAGetLastError()
-        );
+            WSAGetLastError());
 
         closesocket(serverSocket);
         return false;
@@ -228,26 +225,27 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
      * If the buffer became completely full, check whether
      * additional response data still exists.
      */
-    if (totalBytesReceived == bufferSize - 1) {
+    if (totalBytesReceived == bufferSize - 1)
+    {
         char extraByte;
 
         int extraBytes =
             recv(serverSocket, &extraByte, 1, 0);
 
-        if (extraBytes > 0) {
+        if (extraBytes > 0)
+        {
             printf(
-                "Response buffer too small to hold entire response.\n"
-            );
+                "Response buffer too small to hold entire response.\n");
 
             closesocket(serverSocket);
             return false;
         }
 
-        if (extraBytes == SOCKET_ERROR) {
+        if (extraBytes == SOCKET_ERROR)
+        {
             printf(
                 "Error receiving HTTP response: %d\n",
-                WSAGetLastError()
-            );
+                WSAGetLastError());
 
             closesocket(serverSocket);
             return false;
@@ -278,8 +276,7 @@ bool handleResourceRequest(
         bool sendSucceeded = sendFramedResponse(
             clientSocket,
             fileContent,
-            (int)strlen(fileContent)
-        );
+            (int)strlen(fileContent));
 
         free(fileContent);
 
@@ -298,8 +295,7 @@ bool handleResourceRequest(
      */
     printf(
         "File '%s' not found locally. Making HTTP request...\n",
-        cacheFilename
-    );
+        cacheFilename);
 
     char responseBuffer[5000];
 
@@ -342,15 +338,13 @@ bool handleResourceRequest(
         {
             printf(
                 "Error writing to file '%s'.\n",
-                cacheFilename
-            );
+                cacheFilename);
         }
         else
         {
             printf(
                 "Content saved to '%s'.\n",
-                cacheFilename
-            );
+                cacheFilename);
         }
 
         fclose(newFile);
@@ -359,8 +353,7 @@ bool handleResourceRequest(
     {
         printf(
             "Error creating '%s'.\n",
-            cacheFilename
-        );
+            cacheFilename);
     }
 
     /*
@@ -379,17 +372,165 @@ bool handleResourceRequest(
     return true;
 }
 
-bool checkForAnError(int bytesResult, const char *errorAt, SOCKET socket_1, SOCKET socket_2)
+bool handleRttRequest(SOCKET clientSocket)
 {
-    if (SOCKET_ERROR == bytesResult)
+    clock_t startTime = clock();
+
+    /*
+     * Original course RTT-related timing operation.
+     * This currently measures server-side processing time,
+     * not true network round-trip time.
+     */
+
+    volatile double temp = 0.0;
+
+    for (int i = 0; i < 1000000; ++i)
     {
-        printf("Time Server: Error at %s(): %d\n", errorAt, WSAGetLastError());
-        closesocket(socket_1);
-        closesocket(socket_2);
-        WSACleanup();
+        temp = sqrt((double)i);
+    }
+
+    (void)temp;
+
+    clock_t endTime = clock();
+
+    double rtt = measureRTT(startTime, endTime); /* Calculate RTT */
+
+    printf("RTT for request \"RTT\": %.2f ms\n", rtt);
+
+    /*Convert double value rtt to string*/
+    char rttStr[32];
+
+    int written = snprintf(rttStr, sizeof(rttStr), "%.2f ms", rtt);
+
+    if (written < 0 || written >= (int)sizeof(rttStr))
+    {
+        printf("Failed to format RTT response.\n");
+        return false;
+    }
+
+    if (!sendFramedResponse(
+            clientSocket,
+            rttStr,
+            written))
+    {
+        printf("Failed to send RTT response to client.\n");
+        return false;
+    }
+    return true;
+}
+
+bool handleClientCommand(
+    SOCKET clientSocket,
+    const char *command,
+    bool *shouldDisconnect)
+{
+    if (command == NULL || shouldDisconnect == NULL)
+    {
+        return false;
+    }
+
+    *shouldDisconnect = false;
+
+    // Option 1
+    if (strcmp(command, "anything") == 0)
+    {
+        const char *httpRequest =
+            "GET /anything HTTP/1.1\r\n"
+            "Host: httpbin.org\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+
+        const char *errorMessage =
+            "ERROR: Failed to retrieve anything resource.";
+
+        return handleResourceRequest(
+            clientSocket,
+            "anything.txt",
+            httpRequest,
+            errorMessage);
+    }
+
+    // Option 2
+    if (strcmp(command, "json") == 0)
+    {
+        const char *httpRequest =
+            "GET /json HTTP/1.1\r\n"
+            "Host: httpbin.org\r\n"
+            "Connection: close\r\n"
+            "\r\n";
+
+        const char *errorMessage =
+            "ERROR: Failed to retrieve JSON resource.";
+
+        return handleResourceRequest(
+            clientSocket,
+            "json.txt",
+            httpRequest,
+            errorMessage);
+    }
+
+    if (strcmp(command, "RTT") == 0)
+    {
+        return handleRttRequest(clientSocket);
+    }
+
+    if (strcmp(command, "EXIT") == 0)
+    {
+        printf("Server: Closing Client Connection.\n");
+        *shouldDisconnect = true;
         return true;
     }
-    return false;
+
+    /* send framed "unknown command" error */
+    const char *errorMessage = "ERROR: Unknown command.";
+
+    if (!sendFramedResponse(
+            clientSocket,
+            errorMessage,
+            (int)strlen(errorMessage)))
+    {
+        printf("Failed to send unknown command response to client.\n");
+        return false;
+    }
+
+    return true;
+}
+
+bool handleClientSession(SOCKET clientSocket)
+{
+    bool shouldDisconnect = false;
+    while (!shouldDisconnect)
+    {
+        char recvBuff[255];
+
+        int bytesRecv = recv(clientSocket, recvBuff, (int)sizeof(recvBuff) - 1, 0);
+        if (bytesRecv == SOCKET_ERROR)
+        {
+            printf("Server: Error at recv(): %d\n", WSAGetLastError());
+            return false;
+        }
+
+        if (bytesRecv == 0)
+        {
+            printf("Server: Client disconnected.\n");
+            closesocket(clientSocket);
+            break;
+        }
+
+        // No Socket Error, and no 0 bytes received
+        recvBuff[bytesRecv] = '\0';
+
+        if (!handleClientCommand(
+                    clientSocket, 
+                    recvBuff, 
+                    &shouldDisconnect))
+        {
+            printf("Server: Failed to handle command: %s\n", recvBuff);
+            return false;
+        }
+    }
+
+    return true;
 }
 
 int main(void)
@@ -401,7 +542,7 @@ int main(void)
 
     if (NO_ERROR != WSAStartup(MAKEWORD(2, 0), &wsaData))
     {
-        printf("Time Server: Error at WSAStartup()\n");
+        printf("Server: Error at WSAStartup()\n");
         return EXIT_FAILURE;
     }
 
@@ -409,7 +550,7 @@ int main(void)
 
     if (INVALID_SOCKET == listenSocket)
     {
-        printf("Time Server: Error at socket(): ");
+        printf("Server: Error at socket(): ");
         printf("%d", WSAGetLastError());
         WSACleanup();
         return EXIT_FAILURE;
@@ -421,11 +562,11 @@ int main(void)
 
     serverService.sin_addr.s_addr = htonl(INADDR_ANY);
 
-    serverService.sin_port = htons(TIME_PORT);
+    serverService.sin_port = htons(SERVER_PORT);
 
     if (SOCKET_ERROR == bind(listenSocket, (SOCKADDR *)&serverService, sizeof(serverService)))
     {
-        printf("Time Server: Error at bind(): ");
+        printf("Server: Error at bind(): ");
         printf("%d", WSAGetLastError());
         closesocket(listenSocket);
         WSACleanup();
@@ -434,7 +575,7 @@ int main(void)
 
     if (SOCKET_ERROR == listen(listenSocket, 5))
     {
-        printf("Time Server: Error at listen(): ");
+        printf("Server: Error at listen(): ");
         printf("%d", WSAGetLastError());
         closesocket(listenSocket);
         WSACleanup();
@@ -447,140 +588,28 @@ int main(void)
         struct sockaddr_in from;
         int fromLen = sizeof(from);
 
-        printf("Time Server: Wait for clients' requests.\n");
+        printf("Server: Wait for clients' requests.\n");
 
-        SOCKET msgSocket = accept(listenSocket, (struct sockaddr *)&from, &fromLen);
-        if (INVALID_SOCKET == msgSocket)
+        SOCKET clientSocket = accept(listenSocket, (struct sockaddr *)&from, &fromLen);
+        if (INVALID_SOCKET == clientSocket)
         {
-            printf("Time Server: Error at accept(): ");
+            printf("Server: Error at accept(): ");
             printf("%d", WSAGetLastError());
             closesocket(listenSocket);
             WSACleanup();
             return EXIT_FAILURE;
         }
 
-        printf("Time Server: Client is connected.\n");
-        while (1)
+        printf("Server: Client is connected.\n");
+
+        if (!handleClientSession(clientSocket))
         {
-            int bytesRecv = 0;
-            char recvBuff[255];
-
-            bytesRecv = recv(msgSocket, recvBuff, (int)sizeof(recvBuff) - 1, 0);
-            if (checkForAnError(bytesRecv, "recv", listenSocket, msgSocket))
-            {
-                return EXIT_FAILURE;
-            }
-
-            if (bytesRecv == 0)
-            {
-                printf("Time Server: Client disconnected.\n");
-                closesocket(msgSocket);
-                break;
-            }
-
-            // No Socket Error, and no 0 bytes received
-            recvBuff[bytesRecv] = '\0';
-
-            // Option 1
-            if (strcmp(recvBuff, "anything") == 0)
-            {
-                const char *httpRequest =
-                    "GET /anything HTTP/1.1\r\n"
-                    "Host: httpbin.org\r\n"
-                    "Connection: close\r\n"
-                    "\r\n";
-
-                const char *errorMessage =
-                    "ERROR: Failed to retrieve anything resource.";
-
-                if (!handleResourceRequest(
-                        msgSocket,
-                        "anything.txt",
-                        httpRequest,
-                        errorMessage))
-                {
-                    closesocket(msgSocket);
-                    closesocket(listenSocket);
-                    WSACleanup();
-
-                    return EXIT_FAILURE;
-                }
-            }
-            
-            // Option 2
-            else if (strcmp(recvBuff, "json") == 0)
-            {
-                const char *httpRequest =
-                    "GET /json HTTP/1.1\r\n"
-                    "Host: httpbin.org\r\n"
-                    "Connection: close\r\n"
-                    "\r\n";
-
-                const char *errorMessage =
-                    "ERROR: Failed to retrieve JSON resource.";
-
-                if (!handleResourceRequest(
-                        msgSocket,
-                        "json.txt",
-                        httpRequest,
-                        errorMessage))
-                {
-                    closesocket(msgSocket);
-                    closesocket(listenSocket);
-                    WSACleanup();
-
-                    return EXIT_FAILURE;
-                }
-            }
-
-            // Option 3
-            else if (strcmp(recvBuff, "RTT") == 0)
-            { /* Third Request */
-                clock_t startTime = clock();
-
-                /* specific task related to RTT measurement */
-                volatile double temp = 0.0;
-
-                for (int i = 0; i < 1000000; ++i) {
-                    temp = sqrt((double)i);
-                }
-
-                (void)temp;
-
-                clock_t endTime = clock();
-
-                double rtt = measureRTT(startTime, endTime); /* Calculate RTT */
-
-                printf("RTT for request \"RTT\": %.2f ms\n", rtt);
-
-                /*Convert double value rtt to string*/
-                char rttStr[20]; /* Assuming a maximum of 20 characters for the string representation*/
-                snprintf(rttStr, sizeof(rttStr), "%.2f", rtt);
-                strcat(rttStr, " ms");
-
-                /* Send the string back to the client*/
-                if (!sendFramedResponse(
-                        msgSocket,
-                        rttStr,
-                        (int)strlen(rttStr)))
-                {
-                    printf("Failed to send RTT response to client.\n");
-                    closesocket(msgSocket);
-                    closesocket(listenSocket);
-                    WSACleanup();
-                    return EXIT_FAILURE;
-                }
-            }
-
-            else
-            { /* Closing Socket */
-                printf("Time Server: Closing Connection.\n");
-                closesocket(msgSocket);
-                break;
-            }
+            printf("Server: Client session ended with an error.\n");
         }
+
+        closesocket(clientSocket);
     }
-    
+
     closesocket(listenSocket);
     WSACleanup();
 
