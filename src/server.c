@@ -11,11 +11,6 @@ const int SERVER_PORT = 27015;
 const char *HTTP_SERVER_ADDRESS = "httpbin.org";
 const int HTTP_SERVER_PORT = 80;
 
-/* Function to calculate Round-Trip Time (RTT)*/
-double measureRTT(clock_t start, clock_t end)
-{
-    return ((double)(end - start)) / CLOCKS_PER_SEC * 1000.0;
-}
 
 char *readFile(const char *filename)
 {
@@ -374,48 +369,17 @@ bool handleResourceRequest(
 
 bool handleRttRequest(SOCKET clientSocket)
 {
-    clock_t startTime = clock();
-
-    /*
-     * Original course RTT-related timing operation.
-     * This currently measures server-side processing time,
-     * not true network round-trip time.
-     */
-
-    volatile double temp = 0.0;
-
-    for (int i = 0; i < 1000000; ++i)
-    {
-        temp = sqrt((double)i);
-    }
-
-    (void)temp;
-
-    clock_t endTime = clock();
-
-    double rtt = measureRTT(startTime, endTime); /* Calculate RTT */
-
-    printf("RTT for request \"RTT\": %.2f ms\n", rtt);
-
-    /*Convert double value rtt to string*/
-    char rttStr[32];
-
-    int written = snprintf(rttStr, sizeof(rttStr), "%.2f ms", rtt);
-
-    if (written < 0 || written >= (int)sizeof(rttStr))
-    {
-        printf("Failed to format RTT response.\n");
-        return false;
-    }
+    const char *response = "RTT_ACK";
 
     if (!sendFramedResponse(
             clientSocket,
-            rttStr,
-            written))
+            response,
+            (int)strlen(response)))
     {
         printf("Failed to send RTT response to client.\n");
         return false;
     }
+
     return true;
 }
 
@@ -469,11 +433,13 @@ bool handleClientCommand(
             errorMessage);
     }
 
+    //Option 3
     if (strcmp(command, "RTT") == 0)
     {
         return handleRttRequest(clientSocket);
     }
 
+    //Option 4
     if (strcmp(command, "EXIT") == 0)
     {
         printf("Server: Closing Client Connection.\n");
@@ -513,8 +479,7 @@ bool handleClientSession(SOCKET clientSocket)
         if (bytesRecv == 0)
         {
             printf("Server: Client disconnected.\n");
-            closesocket(clientSocket);
-            break;
+            return false;
         }
 
         // No Socket Error, and no 0 bytes received

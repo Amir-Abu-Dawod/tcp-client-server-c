@@ -1,5 +1,6 @@
 #include <stdint.h>
 #include <winsock2.h>
+#include <windows.h>
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -7,6 +8,17 @@
 
 const uint32_t MAX_RESPONSE_SIZE = 1024 * 1024;
 const int CLIENT_PORT = 27015;
+
+double elapsedMilliseconds(
+    LARGE_INTEGER start,
+    LARGE_INTEGER end,
+    LARGE_INTEGER frequency
+)
+{
+    return
+        ((double)(end.QuadPart - start.QuadPart) * 1000.0) /
+        (double)frequency.QuadPart;
+}
 
 bool checkForAnError(int bytesResult, const char* errorAt, SOCKET socket){
     if (SOCKET_ERROR == bytesResult) {
@@ -17,6 +29,48 @@ bool checkForAnError(int bytesResult, const char* errorAt, SOCKET socket){
         return true;
     }
     return false;
+}
+
+bool sendAll(
+    SOCKET socket,
+    const char *data,
+    int length
+)
+{
+    int totalSent = 0;
+
+    while (totalSent < length)
+    {
+        int bytesSent = send(
+            socket,
+            data + totalSent,
+            length - totalSent,
+            0
+        );
+
+        if (bytesSent == SOCKET_ERROR)
+        {
+            printf(
+                "Error sending data: %d\n",
+                WSAGetLastError()
+            );
+
+            return false;
+        }
+
+        if (bytesSent == 0)
+        {
+            printf(
+                "Socket closed while sending data.\n"
+            );
+
+            return false;
+        }
+
+        totalSent += bytesSent;
+    }
+
+    return true;
 }
 
 int recvAll(
@@ -61,8 +115,15 @@ int recvAll(
     return 1;
 }
 
-int receiveFramedResponse(SOCKET socket)
+int receiveFramedResponse(SOCKET socket, char **responseOut)
 {
+    if (responseOut == NULL)
+    {
+        return -1;
+    }
+
+    *responseOut = NULL;
+
     uint32_t networkLength = 0;
 
     int status = recvAll(
@@ -115,17 +176,20 @@ int receiveFramedResponse(SOCKET socket)
 
     response[payloadLength] = '\0';
 
-    printf(
-        "\nReceived from server:\n%s\n",
-        response
-    );
-
-    free(response);
+    *responseOut = response;
 
     return 1;
 }
 
 int main(void) {
+    LARGE_INTEGER frequency;
+
+    if (!QueryPerformanceFrequency(&frequency))
+    {
+        printf("Failed to initialize high-resolution timer.\n");
+        return EXIT_FAILURE;
+    }
+
     WSADATA wsaData;
     if (NO_ERROR != WSAStartup(MAKEWORD(2, 0), &wsaData)) {
         printf("Client: Error at WSAStartup()\n");
@@ -155,8 +219,6 @@ int main(void) {
         return EXIT_FAILURE;
     }
     printf("Connection established successfully.\n");
-
-    int bytesSent = 0;
 
     char sendBuff[255];
     char option;
@@ -192,17 +254,36 @@ int main(void) {
                 continue;
         }
 
-        bytesSent = send(connSocket, sendBuff, (int)strlen(sendBuff), 0);
-        if (checkForAnError(bytesSent, "send", connSocket))
+        LARGE_INTEGER rttStart;
+        LARGE_INTEGER rttEnd;
+
+        if (option == '3')
+        {
+            QueryPerformanceCounter(&rttStart);
+        }
+
+        if (!sendAll(
+            connSocket,
+            sendBuff,
+            (int)strlen(sendBuff)))
+        {
+            printf("\nFailed to send command to server.\n");
+
+            closesocket(connSocket);
+            WSACleanup();
+
             return EXIT_FAILURE;
+        }
 
         if (option == '4') {
             printf("\nClosing connection.\n");
             break;
         }
 
+        char *response = NULL;
+
         // Reserve one byte for the null terminator.
-        int receiveStatus = receiveFramedResponse(connSocket);
+        int receiveStatus = receiveFramedResponse(connSocket, &response);
 
         if (receiveStatus == 0)
         {
@@ -223,6 +304,28 @@ int main(void) {
 
             return EXIT_FAILURE;
         }
+        if (option == '3')
+        {
+            QueryPerformanceCounter(&rttEnd);
+
+            double rttMs =
+                elapsedMilliseconds(
+                    rttStart,
+                    rttEnd,
+                    frequency
+                );
+
+            printf("\nRTT: %.3f ms\n", rttMs);
+        }
+        else
+        {
+            printf(
+                "\nReceived from server:\n%s\n",
+                response
+            );
+        }
+
+        free(response);
     }
 
     closesocket(connSocket);
