@@ -250,7 +250,7 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
     if (!sendAll(serverSocket, request, (int)strlen(request)))
     {
         printf("Error sending request to server.\n");
-        closesocket(serverSocket);
+        socketClose(serverSocket);
         return false;
     }
 
@@ -284,7 +284,7 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
             "Error receiving HTTP response: %d\n",
             socketLastError());
 
-        closesocket(serverSocket);
+        socketClose(serverSocket);
         return false;
     }
 
@@ -304,7 +304,7 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
             printf(
                 "Response buffer too small to hold entire response.\n");
 
-            closesocket(serverSocket);
+            socketClose(serverSocket);
             return false;
         }
 
@@ -314,7 +314,7 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
                 "Error receiving HTTP response: %d\n",
                 socketLastError());
 
-            closesocket(serverSocket);
+            socketClose(serverSocket);
             return false;
         }
     }
@@ -629,11 +629,11 @@ int main(void)
 
     serverService.sin_port = htons(SERVER_PORT);
 
-    if (SOCKET_FAILURE == bind(listenSocket, (SOCKADDR *)&serverService, sizeof(serverService)))
+    if (SOCKET_FAILURE == bind(listenSocket, (struct sockaddr *)&serverService, sizeof(serverService)))
     {
         printf("Server: Error at bind(): ");
         printf("%d", socketLastError());
-        closesocket(listenSocket);
+        socketClose(listenSocket);
         socketPlatformCleanup();
         return EXIT_FAILURE;
     }
@@ -642,7 +642,7 @@ int main(void)
     {
         printf("Server: Error at listen(): ");
         printf("%d", socketLastError());
-        closesocket(listenSocket);
+        socketClose(listenSocket);
         socketPlatformCleanup();
         return EXIT_FAILURE;
     }
@@ -660,7 +660,7 @@ int main(void)
         {
             printf("Server: Error at accept(): ");
             printf("%d", socketLastError());
-            closesocket(listenSocket);
+            socketClose(listenSocket);
             socketPlatformCleanup();
             return EXIT_FAILURE;
         }
@@ -672,10 +672,10 @@ int main(void)
             printf("Server: Client session ended with an error.\n");
         }
 
-        closesocket(clientSocket);
+        socketClose(clientSocket);
     }
 
-    closesocket(listenSocket);
+    socketClose(listenSocket);
     socketPlatformCleanup();
 
     return EXIT_SUCCESS;
