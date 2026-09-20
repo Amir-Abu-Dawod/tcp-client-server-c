@@ -8,9 +8,70 @@
 #include <math.h>
 
 const int SERVER_PORT = 27015;
-const char *HTTP_SERVER_ADDRESS = "httpbin.org";
-const int HTTP_SERVER_PORT = 80;
+const char *DEFAULT_HTTP_SERVER_ADDRESS = "httpbin.org";
+const int DEFAULT_HTTP_SERVER_PORT = 80;
 
+const char *getHttpServerAddress(void)
+{
+    const char *address =
+        getenv("TCP_HTTP_HOST");
+
+    if (address != NULL &&
+        address[0] != '\0')
+    {
+        return address;
+    }
+
+    return DEFAULT_HTTP_SERVER_ADDRESS;
+}
+
+bool getHttpServerPort(
+    int *portOut
+)
+{
+    if (portOut == NULL)
+    {
+        return false;
+    }
+
+    const char *portString =
+        getenv("TCP_HTTP_PORT");
+
+    if (portString == NULL ||
+        portString[0] == '\0')
+    {
+        *portOut =
+            DEFAULT_HTTP_SERVER_PORT;
+
+        return true;
+    }
+
+    char *endPointer = NULL;
+
+    long port =
+        strtol(
+            portString,
+            &endPointer,
+            10
+        );
+
+    if (endPointer == portString ||
+        *endPointer != '\0' ||
+        port < 1 ||
+        port > 65535)
+    {
+        printf(
+            "Invalid TCP_HTTP_PORT value: %s\n",
+            portString
+        );
+
+        return false;
+    }
+
+    *portOut = (int)port;
+
+    return true;
+}
 
 char *readFile(const char *filename)
 {
@@ -162,6 +223,17 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
         return false;
     }
 
+    const char *httpServerAddress =
+        getHttpServerAddress();
+
+    int httpServerPort;
+
+    if (!getHttpServerPort(
+            &httpServerPort))
+    {
+        return false;
+    }
+
     struct addrinfo hints;
     struct addrinfo *addressList = NULL;
 
@@ -181,7 +253,7 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
         portString,
         sizeof(portString),
         "%d",
-        HTTP_SERVER_PORT
+        httpServerPort
     );
 
     if (written < 0 ||
@@ -191,7 +263,7 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
         return false;
     }
 
-    int addressStatus = getaddrinfo(HTTP_SERVER_ADDRESS, portString, &hints, &addressList);
+    int addressStatus = getaddrinfo(httpServerAddress, portString, &hints, &addressList);
 
     if (addressStatus != 0)
     {
@@ -628,6 +700,19 @@ int main(void)
     serverService.sin_addr.s_addr = htonl(INADDR_ANY);
 
     serverService.sin_port = htons(SERVER_PORT);
+
+    if (!socketEnableAddressReuse(listenSocket))
+    {
+        printf(
+            "Server: Failed to configure socket address reuse: %d\n",
+            socketLastError()
+        );
+
+        socketClose(listenSocket);
+        socketPlatformCleanup();
+
+        return EXIT_FAILURE;
+    }
 
     if (SOCKET_FAILURE == bind(listenSocket, (struct sockaddr *)&serverService, sizeof(serverService)))
     {

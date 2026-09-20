@@ -16,6 +16,13 @@ typedef int socket_io_t;
 #define SOCKET_INVALID INVALID_SOCKET
 #define SOCKET_FAILURE SOCKET_ERROR
 
+static inline bool socketEnableAddressReuse(
+    socket_t socket)
+{
+    (void)socket;
+    return true;
+}
+
 static inline int socketPlatformInit(void)
 {
     WSADATA wsaData;
@@ -60,6 +67,20 @@ typedef ssize_t socket_io_t;
 
 #define SOCKET_INVALID (-1)
 #define SOCKET_FAILURE (-1)
+
+static inline bool socketEnableAddressReuse(
+    socket_t socket)
+{
+    int enabled = 1;
+
+    return setsockopt(
+        socket,
+        SOL_SOCKET,
+        SO_REUSEADDR,
+        &enabled,
+        sizeof(enabled)
+    ) == 0;
+}
 
 static inline int socketPlatformInit(void)
 {
