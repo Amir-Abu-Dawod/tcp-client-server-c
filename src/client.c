@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include <winsock2.h>
+#include "socket_platform.h"
 #include <windows.h>
 #include <string.h>
 #include <stdio.h>
@@ -20,39 +20,39 @@ double elapsedMilliseconds(
         (double)frequency.QuadPart;
 }
 
-bool checkForAnError(int bytesResult, const char* errorAt, SOCKET socket){
-    if (SOCKET_ERROR == bytesResult) {
+bool checkForAnError(int bytesResult, const char* errorAt, socket_t socket){
+    if (SOCKET_FAILURE == bytesResult) {
         printf("Client: Error at %s(): ", errorAt);
-        printf("%d\n", WSAGetLastError());
-        closesocket(socket);
-        WSACleanup();
+        printf("%d\n", socketLastError());
+        socketClose(socket);
+        socketPlatformCleanup();
         return true;
     }
     return false;
 }
 
 bool sendAll(
-    SOCKET socket,
+    socket_t socket,
     const char *data,
     int length
 )
 {
-    int totalSent = 0;
+    socket_io_t totalSent = 0;
 
     while (totalSent < length)
     {
-        int bytesSent = send(
+        socket_io_t bytesSent = send(
             socket,
             data + totalSent,
             length - totalSent,
             0
         );
 
-        if (bytesSent == SOCKET_ERROR)
+        if (bytesSent == SOCKET_FAILURE)
         {
             printf(
                 "Error sending data: %d\n",
-                WSAGetLastError()
+                socketLastError()
             );
 
             return false;
@@ -74,16 +74,16 @@ bool sendAll(
 }
 
 int recvAll(
-    SOCKET socket,
+    socket_t socket,
     char *buffer,
     int length
 )
 {
-    int totalReceived = 0;
+    socket_io_t totalReceived = 0;
 
     while (totalReceived < length)
     {
-        int bytesReceived = recv(
+        socket_io_t bytesReceived = recv(
             socket,
             buffer + totalReceived,
             length - totalReceived,
@@ -104,7 +104,7 @@ int recvAll(
 
         printf(
             "Error receiving data: %d\n",
-            WSAGetLastError()
+            socketLastError()
         );
 
         //socket error
@@ -115,7 +115,7 @@ int recvAll(
     return 1;
 }
 
-int receiveFramedResponse(SOCKET socket, char **responseOut)
+int receiveFramedResponse(socket_t socket, char **responseOut)
 {
     if (responseOut == NULL)
     {
@@ -190,17 +190,23 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    WSADATA wsaData;
-    if (NO_ERROR != WSAStartup(MAKEWORD(2, 0), &wsaData)) {
-        printf("Client: Error at WSAStartup()\n");
+    int platformStatus = socketPlatformInit();
+
+    if (platformStatus != 0)
+    {
+        printf(
+            "Client: Failed to initialize socket platform: %d\n",
+            platformStatus
+        );
+
         return EXIT_FAILURE;
     }
 
-    SOCKET connSocket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (INVALID_SOCKET == connSocket) {
-        printf("Client: Error at socket(): ");
-        printf("%d", WSAGetLastError());
-        WSACleanup();
+    socket_t connSocket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (SOCKET_INVALID == connSocket) {
+        printf("Client: Error at socket(): %d\n", socketLastError());
+        socketClose(connSocket);
+        socketPlatformCleanup();
         return EXIT_FAILURE;
     }
 
@@ -211,11 +217,11 @@ int main(void) {
     server.sin_addr.s_addr = inet_addr("127.0.0.1");
     server.sin_port = htons(CLIENT_PORT);
 
-    if (SOCKET_ERROR == connect(connSocket, (SOCKADDR*)&server, sizeof(server))) {
+    if (SOCKET_FAILURE == connect(connSocket, (struct sockaddr *)&server, sizeof(server))) {
         printf("Client: Error at connect(): ");
-        printf("%d", WSAGetLastError());
-        closesocket(connSocket);
-        WSACleanup();
+        printf("%d", socketLastError());
+        socketClose(connSocket);
+        socketPlatformCleanup();
         return EXIT_FAILURE;
     }
     printf("Connection established successfully.\n");
@@ -269,8 +275,8 @@ int main(void) {
         {
             printf("\nFailed to send command to server.\n");
 
-            closesocket(connSocket);
-            WSACleanup();
+            socketClose(connSocket);
+            socketPlatformCleanup();
 
             return EXIT_FAILURE;
         }
@@ -299,8 +305,8 @@ int main(void) {
                 "\nFailed to receive server response.\n"
             );
 
-            closesocket(connSocket);
-            WSACleanup();
+            socketClose(connSocket);
+            socketPlatformCleanup();
 
             return EXIT_FAILURE;
         }
@@ -328,8 +334,8 @@ int main(void) {
         free(response);
     }
 
-    closesocket(connSocket);
-    WSACleanup();
+    socketClose(connSocket);
+    socketPlatformCleanup();
 
     return EXIT_SUCCESS;
 }

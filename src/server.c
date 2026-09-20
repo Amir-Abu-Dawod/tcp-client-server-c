@@ -1,5 +1,5 @@
 #include <stdint.h>
-#include <winsock2.h>
+#include "socket_platform.h"
 #include <string.h>
 #include <time.h>
 #include <stdio.h>
@@ -69,7 +69,7 @@ char *readFile(const char *filename)
     return buffer;
 }
 
-bool sendAll(SOCKET socket, const char *data, int length)
+bool sendAll(socket_t socket, const char *data, int length)
 {
     int totalSent = 0;
 
@@ -85,7 +85,7 @@ bool sendAll(SOCKET socket, const char *data, int length)
         {
             printf(
                 "Error sending data: %d\n",
-                WSAGetLastError());
+                socketLastError());
             return false;
         }
 
@@ -102,7 +102,7 @@ bool sendAll(SOCKET socket, const char *data, int length)
 }
 
 bool sendFramedResponse(
-    SOCKET socket,
+    socket_t socket,
     const char *payload,
     int payloadLength)
 {
@@ -134,7 +134,7 @@ bool sendFramedResponse(
         payloadLength);
 }
 
-/* Function to send HTTP request to the main server */
+/* Function to send HTTP request to the main server */  
 bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
 {
     if (responseBuffer == NULL || bufferSize <= 1)
@@ -143,8 +143,8 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
     }
 
     /* Create a socket to communicate with the main server*/
-    SOCKET serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (serverSocket == INVALID_SOCKET)
+    socket_t serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (serverSocket == SOCKET_INVALID)
     {
         printf("Error creating server socket.\n");
         return false;
@@ -210,7 +210,7 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
 
         printf(
             "Error receiving HTTP response: %d\n",
-            WSAGetLastError());
+            socketLastError());
 
         closesocket(serverSocket);
         return false;
@@ -240,7 +240,7 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
         {
             printf(
                 "Error receiving HTTP response: %d\n",
-                WSAGetLastError());
+                socketLastError());
 
             closesocket(serverSocket);
             return false;
@@ -255,7 +255,7 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
 }
 
 bool handleResourceRequest(
-    SOCKET clientSocket,
+    socket_t clientSocket,
     const char *cacheFilename,
     const char *httpRequest,
     const char *errorMessage)
@@ -367,7 +367,7 @@ bool handleResourceRequest(
     return true;
 }
 
-bool handleRttRequest(SOCKET clientSocket)
+bool handleRttRequest(socket_t clientSocket)
 {
     const char *response = "RTT_ACK";
 
@@ -384,7 +384,7 @@ bool handleRttRequest(SOCKET clientSocket)
 }
 
 bool handleClientCommand(
-    SOCKET clientSocket,
+    socket_t clientSocket,
     const char *command,
     bool *shouldDisconnect)
 {
@@ -462,7 +462,7 @@ bool handleClientCommand(
     return true;
 }
 
-bool handleClientSession(SOCKET clientSocket)
+bool handleClientSession(socket_t clientSocket)
 {
     bool shouldDisconnect = false;
     while (!shouldDisconnect)
@@ -472,7 +472,7 @@ bool handleClientSession(SOCKET clientSocket)
         int bytesRecv = recv(clientSocket, recvBuff, (int)sizeof(recvBuff) - 1, 0);
         if (bytesRecv == SOCKET_ERROR)
         {
-            printf("Server: Error at recv(): %d\n", WSAGetLastError());
+            printf("Server: Error at recv(): %d\n", socketLastError());
             return false;
         }
 
@@ -501,23 +501,28 @@ bool handleClientSession(SOCKET clientSocket)
 int main(void)
 {
 
-    WSADATA wsaData;
-    SOCKET listenSocket;
-    struct sockaddr_in serverService;
+    int platformStatus = socketPlatformInit();
 
-    if (NO_ERROR != WSAStartup(MAKEWORD(2, 0), &wsaData))
+    if (platformStatus != 0)
     {
-        printf("Server: Error at WSAStartup()\n");
+        printf(
+            "Server: Failed to initialize socket platform: %d\n",
+            platformStatus
+        );
+
         return EXIT_FAILURE;
     }
 
+    socket_t listenSocket;
+    struct sockaddr_in serverService;
+
     listenSocket = socket(PF_INET, SOCK_STREAM, IPPROTO_TCP);
 
-    if (INVALID_SOCKET == listenSocket)
+    if (SOCKET_INVALID == listenSocket)
     {
         printf("Server: Error at socket(): ");
-        printf("%d", WSAGetLastError());
-        WSACleanup();
+        printf("%d", socketLastError());
+        socketPlatformCleanup();
         return EXIT_FAILURE;
     }
 
@@ -532,18 +537,18 @@ int main(void)
     if (SOCKET_ERROR == bind(listenSocket, (SOCKADDR *)&serverService, sizeof(serverService)))
     {
         printf("Server: Error at bind(): ");
-        printf("%d", WSAGetLastError());
+        printf("%d", socketLastError());
         closesocket(listenSocket);
-        WSACleanup();
+        socketPlatformCleanup();
         return EXIT_FAILURE;
     }
 
     if (SOCKET_ERROR == listen(listenSocket, 5))
     {
         printf("Server: Error at listen(): ");
-        printf("%d", WSAGetLastError());
+        printf("%d", socketLastError());
         closesocket(listenSocket);
-        WSACleanup();
+        socketPlatformCleanup();
         return EXIT_FAILURE;
     }
 
@@ -551,17 +556,17 @@ int main(void)
     {
 
         struct sockaddr_in from;
-        int fromLen = sizeof(from);
+        socket_len_t fromLen = (socket_len_t)sizeof(from);
 
         printf("Server: Wait for clients' requests.\n");
 
-        SOCKET clientSocket = accept(listenSocket, (struct sockaddr *)&from, &fromLen);
-        if (INVALID_SOCKET == clientSocket)
+        socket_t clientSocket = accept(listenSocket, (struct sockaddr *)&from, &fromLen);
+        if (SOCKET_INVALID == clientSocket)
         {
             printf("Server: Error at accept(): ");
-            printf("%d", WSAGetLastError());
+            printf("%d", socketLastError());
             closesocket(listenSocket);
-            WSACleanup();
+            socketPlatformCleanup();
             return EXIT_FAILURE;
         }
 
@@ -576,7 +581,7 @@ int main(void)
     }
 
     closesocket(listenSocket);
-    WSACleanup();
+    socketPlatformCleanup();
 
     return EXIT_SUCCESS;
 }
