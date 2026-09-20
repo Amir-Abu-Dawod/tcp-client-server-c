@@ -1,6 +1,6 @@
 #include <stdint.h>
 #include "socket_platform.h"
-#include <windows.h>
+#include "timer_platform.h"
 #include <string.h>
 #include <stdio.h>
 #include <stdbool.h>
@@ -8,17 +8,6 @@
 
 const uint32_t MAX_RESPONSE_SIZE = 1024 * 1024;
 const int CLIENT_PORT = 27015;
-
-double elapsedMilliseconds(
-    LARGE_INTEGER start,
-    LARGE_INTEGER end,
-    LARGE_INTEGER frequency
-)
-{
-    return
-        ((double)(end.QuadPart - start.QuadPart) * 1000.0) /
-        (double)frequency.QuadPart;
-}
 
 bool checkForAnError(int bytesResult, const char* errorAt, socket_t socket){
     if (SOCKET_FAILURE == bytesResult) {
@@ -182,11 +171,14 @@ int receiveFramedResponse(socket_t socket, char **responseOut)
 }
 
 int main(void) {
-    LARGE_INTEGER frequency;
+    monotonic_clock_t monotonicClock;
 
-    if (!QueryPerformanceFrequency(&frequency))
+    if (!monotonicClockInit(&monotonicClock))
     {
-        printf("Failed to initialize high-resolution timer.\n");
+        printf(
+            "Failed to initialize monotonic timer.\n"
+        );
+
         return EXIT_FAILURE;
     }
 
@@ -260,12 +252,19 @@ int main(void) {
                 continue;
         }
 
-        LARGE_INTEGER rttStart;
-        LARGE_INTEGER rttEnd;
+        monotonic_time_t rttStart;
+        monotonic_time_t rttEnd;
 
         if (option == '3')
         {
-            QueryPerformanceCounter(&rttStart);
+            if (!monotonicTimeNow(&rttStart))
+            {
+                printf(
+                    "\nFailed to record RTT start time.\n"
+                );
+
+                break;
+            }
         }
 
         if (!sendAll(
@@ -312,13 +311,20 @@ int main(void) {
         }
         if (option == '3')
         {
-            QueryPerformanceCounter(&rttEnd);
+            if (!monotonicTimeNow(&rttEnd))
+            {
+                printf(
+                    "\nFailed to record RTT end time.\n"
+                );
+
+                break;
+            }
 
             double rttMs =
-                elapsedMilliseconds(
+                monotonicElapsedMilliseconds(
+                    &monotonicClock,
                     rttStart,
-                    rttEnd,
-                    frequency
+                    rttEnd
                 );
 
             printf("\nRTT: %.3f ms\n", rttMs);
