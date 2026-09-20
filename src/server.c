@@ -81,7 +81,7 @@ bool sendAll(socket_t socket, const char *data, int length)
             length - totalSent,
             0);
 
-        if (bytesSent == SOCKET_ERROR)
+        if (bytesSent == SOCKET_FAILURE)
         {
             printf(
                 "Error sending data: %d\n",
@@ -142,35 +142,87 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
         return false;
     }
 
-    /* Create a socket to communicate with the main server*/
-    socket_t serverSocket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    struct addrinfo hints;
+    struct addrinfo *addressList = NULL;
+
+    memset(
+        &hints,
+        0,
+        sizeof(hints)
+    );
+
+    hints.ai_family = AF_UNSPEC; // Give me any usable address family (IPv4/IPv6)
+    hints.ai_socktype = SOCK_STREAM;
+    hints.ai_protocol = IPPROTO_TCP;
+
+    char portString[16];
+
+    int written = snprintf(
+        portString,
+        sizeof(portString),
+        "%d",
+        HTTP_SERVER_PORT
+    );
+
+    if (written < 0 ||
+        written >= (int)sizeof(portString))
+    {
+        printf("Failed to format HTTP server port.\n");
+        return false;
+    }
+
+    int addressStatus = getaddrinfo(HTTP_SERVER_ADDRESS, portString, &hints, &addressList);
+
+    if (addressStatus != 0)
+    {
+        printf(
+            "Error resolving server address.\n"
+        );
+
+        return false;
+    }
+
+    socket_t serverSocket = SOCKET_INVALID;
+
+    //Then iterate through the address list.
+    for (
+        struct addrinfo *address = addressList;
+        address != NULL;
+        address = address->ai_next
+    )
+    {
+        serverSocket = socket(
+            address->ai_family,
+            address->ai_socktype,
+            address->ai_protocol
+        );
+
+        if (serverSocket == SOCKET_INVALID)
+        {
+            continue;
+        }
+
+        if (connect(
+                serverSocket,
+                address->ai_addr,
+                (socket_len_t)address->ai_addrlen
+            ) == 0)
+        {
+            break;
+        }
+
+        socketClose(serverSocket);
+        serverSocket = SOCKET_INVALID;
+    }
+    
+    freeaddrinfo(addressList);
+
     if (serverSocket == SOCKET_INVALID)
     {
-        printf("Error creating server socket.\n");
-        return false;
-    }
+        printf(
+            "Unable to connect to HTTP server.\n"
+        );
 
-    /*Resolve the server's IP address*/
-    struct hostent *remoteHost = gethostbyname(HTTP_SERVER_ADDRESS);
-    if (remoteHost == NULL)
-    {
-        printf("Error resolving server address.\n");
-        closesocket(serverSocket);
-        return false;
-    }
-
-    /* Create a sockaddr_in structure for connecting to the server*/
-    struct sockaddr_in serverAddr;
-    memset(&serverAddr, 0, sizeof(serverAddr));
-    serverAddr.sin_family = AF_INET;
-    serverAddr.sin_addr.s_addr = *((unsigned long *)remoteHost->h_addr);
-    serverAddr.sin_port = htons(HTTP_SERVER_PORT);
-
-    /*Connect to the main server*/
-    if (connect(serverSocket, (struct sockaddr *)&serverAddr, sizeof(serverAddr)) == SOCKET_ERROR)
-    {
-        printf("Error connecting to server.\n");
-        closesocket(serverSocket);
         return false;
     }
 
@@ -236,7 +288,7 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
             return false;
         }
 
-        if (extraBytes == SOCKET_ERROR)
+        if (extraBytes == SOCKET_FAILURE)
         {
             printf(
                 "Error receiving HTTP response: %d\n",
@@ -470,7 +522,7 @@ bool handleClientSession(socket_t clientSocket)
         char recvBuff[255];
 
         int bytesRecv = recv(clientSocket, recvBuff, (int)sizeof(recvBuff) - 1, 0);
-        if (bytesRecv == SOCKET_ERROR)
+        if (bytesRecv == SOCKET_FAILURE)
         {
             printf("Server: Error at recv(): %d\n", socketLastError());
             return false;
@@ -534,7 +586,7 @@ int main(void)
 
     serverService.sin_port = htons(SERVER_PORT);
 
-    if (SOCKET_ERROR == bind(listenSocket, (SOCKADDR *)&serverService, sizeof(serverService)))
+    if (SOCKET_FAILURE == bind(listenSocket, (SOCKADDR *)&serverService, sizeof(serverService)))
     {
         printf("Server: Error at bind(): ");
         printf("%d", socketLastError());
@@ -543,7 +595,7 @@ int main(void)
         return EXIT_FAILURE;
     }
 
-    if (SOCKET_ERROR == listen(listenSocket, 5))
+    if (SOCKET_FAILURE == listen(listenSocket, 5))
     {
         printf("Server: Error at listen(): ");
         printf("%d", socketLastError());
