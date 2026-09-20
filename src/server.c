@@ -134,6 +134,26 @@ bool sendFramedResponse(
         payloadLength);
 }
 
+int getHttpStatusCode(const char *response)
+{
+    if (response == NULL)
+    {
+        return -1;
+    }
+
+    int statusCode = 0;
+
+    if (sscanf(
+            response,
+            "HTTP/%*d.%*d %d",
+            &statusCode) != 1)
+    {
+        return -1;
+    }
+
+    return statusCode;
+}
+
 /* Function to send HTTP request to the main server */  
 bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
 {
@@ -298,10 +318,33 @@ bool sendHttpRequest(const char *request, char *responseBuffer, int bufferSize)
             return false;
         }
     }
-
+    
     responseBuffer[totalBytesReceived] = '\0';
 
-    closesocket(serverSocket);
+    socketClose(serverSocket);
+
+    int statusCode =
+        getHttpStatusCode(responseBuffer);
+
+    if (statusCode < 0)
+    {
+        printf(
+            "Failed to parse HTTP response status.\n"
+        );
+
+        return false;
+    }
+
+    if (statusCode < 200 ||
+        statusCode >= 300)
+    {
+        printf(
+            "HTTP request failed with status %d.\n",
+            statusCode
+        );
+
+        return false;
+    }
 
     return true;
 }
