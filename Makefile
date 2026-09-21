@@ -23,9 +23,12 @@ endif
 SERVER := $(BUILD_DIR)/server$(EXE)
 CLIENT := $(BUILD_DIR)/client$(EXE)
 
-.PHONY: all clean server client
+.PHONY: all clean server client test
 
 all: $(SERVER) $(CLIENT)
+
+test: server
+	python3 -m pytest -v
 
 server: $(SERVER)
 
