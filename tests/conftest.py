@@ -11,7 +11,9 @@ from tests.mock_http_server import create_mock_http_server
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SERVER_BINARY = PROJECT_ROOT / "build" / "server"
+SERVER_BINARY = PROJECT_ROOT / "build" / (
+    "server.exe" if os.name == "nt" else "server"
+)
 
 SERVER_HOST = "127.0.0.1"
 SERVER_PORT = 27015

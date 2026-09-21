@@ -6,13 +6,17 @@ SRC_DIR := src
 BUILD_DIR := build
 
 ifeq ($(OS),Windows_NT)
+    SHELL := cmd.exe
+    
     EXE := .exe
+    PYTHON := python
     LDLIBS := -lws2_32
 
     MKDIR_BUILD := if not exist "$(BUILD_DIR)" mkdir "$(BUILD_DIR)"
     CLEAN_BUILD := if exist "$(BUILD_DIR)" rmdir /S /Q "$(BUILD_DIR)"
 else
     EXE :=
+    PYTHON := python3
     CPPFLAGS := -D_POSIX_C_SOURCE=200809L
     LDLIBS :=
 
@@ -28,7 +32,7 @@ CLIENT := $(BUILD_DIR)/client$(EXE)
 all: $(SERVER) $(CLIENT)
 
 test: server
-	python3 -m pytest -v
+	$(PYTHON) -m pytest -v
 
 server: $(SERVER)
 
