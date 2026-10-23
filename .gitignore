@@ -28,6 +28,9 @@ __pycache__/
 .venv/
 venv/
 
+# Generated containing structured fields
+reports/
+
 # OS files
 .DS_Store
 Thumbs.db
